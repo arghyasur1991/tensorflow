@@ -1,0 +1,56 @@
+bazel build --cxxopt="-std=c++11" --fat_apk_cpu=arm64-v8a,armeabi-v7a \
+  --host_crosstool_top=@bazel_tools//tools/cpp:toolchain \
+  //tensorflow/lite/java:tensorflow-lite
+
+
+/usr/local/bin/python3.7
+
+
+ bazel build //tensorflow/lite:libtensorflowlite.so --crosstool_top=//external:android/crosstool --cpu=armeabi-v7a --fat_apk_cpu=armeabi-v7a --host_crosstool_top=@bazel_tools//tools/cpp:toolchain --cxxopt="-std=c++17" -c opt --config=android
+
+
+ bazel build //tensorflow/lite/c:libtensorflowlite_c.so --crosstool_top=//external:android/crosstool --cpu=armeabi-v7a --fat_apk_cpu=armeabi-v7a --host_crosstool_top=@bazel_tools//tools/cpp:toolchain --cxxopt="-std=c++17" -c opt --config=android
+
+
+ bazel build -c opt --config android_arm --copt -Os --copt -DTFLITE_GPU_BINARY_RELEASE --copt --linkopt -s --strip always :libtensorflowlite_gpu_delegate.so
+
+ bazel build -c opt --config android_arm --copt -Os --copt -DTFLITE_GPU_BINARY_RELEASE --copt --linkopt -s --strip always :libtensorflowlite_gpu_gl.so
+
+ bazel build -c opt --config android_arm tensorflow/lite/delegates/gpu:libtensorflowlite_gpu_gl.so
+
+ build -c opt --config android_arm --copt -s --strip always tensorflow/lite/delegates/gpu:libtensorflowlite_gpu_gl.so
+
+
+
+
+cc_binary(
+    name = "libtensorflowLite.so",
+    linkopts=[
+        "-shared", 
+        "-Wl,-soname=libtensorflowLite.so",
+    ],
+    linkshared = 1,
+    copts = tflite_copts(),
+    deps = [
+        ":framework",
+        "//tensorflow/lite/kernels:builtin_ops",
+    ],
+)
+
+bazel run --config=opt tensorflow/lite/toco:toco -- \
+--input_file=/Users/sur/Documents/ssdlite_mobilenet_v2_coco_2018_05_09/frozen_inference_graph.pb \
+--output_file=$OUTPUT_DIR/detect.tflite \
+--input_shapes=1,300,300,3 \
+--input_arrays=normalized_input_image_tensor \
+--output_arrays='TFLite_Detection_PostProcess','TFLite_Detection_PostProcess:1','TFLite_Detection_PostProcess:2','TFLite_Detection_PostProcess:3'  \
+--inference_type=FLOAT \
+--allow_custom_ops
+
+bazel run --config=opt tensorflow/lite/toco:toco -- \
+--input_file=/Users/sur/Documents/ssdlite_mobilenet_v2_coco_2018_05_09/frozen_inference_graph.pb \
+--output_file=$OUTPUT_DIR/detect.tflite \
+--input_shapes=1,300,300,3 \
+--input_arrays=normalized_input_image_tensor \
+--output_arrays=TFlite_Detection_PostProcess  \
+--inference_type=FLOAT \
+--allow_custom_ops

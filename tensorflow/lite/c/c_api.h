@@ -130,6 +130,10 @@ TFL_CAPI_EXPORT extern void TfLiteInterpreterOptionsSetNumThreads(
 TFL_CAPI_EXPORT extern void TfLiteInterpreterOptionsAddDelegate(
     TfLiteInterpreterOptions* options, TfLiteDelegate* delegate);
 
+
+TFL_CAPI_EXPORT extern void TfLiteInterpreterOptionsSetAllowBufferHandleOutput(
+    TfLiteInterpreterOptions* options, bool allow_buffer_handle_output);
+
 // Sets a custom error reporter for interpreter execution.
 //
 // * `reporter` takes the provided `user_data` object, as well as a C-style
@@ -157,11 +161,15 @@ typedef struct TfLiteInterpreter TfLiteInterpreter;
 // NOTE: The client *must* explicitly allocate tensors before attempting to
 // access input tensor data or invoke the interpreter.
 TFL_CAPI_EXPORT extern TfLiteInterpreter* TfLiteInterpreterCreate(
-    const TfLiteModel* model, const TfLiteInterpreterOptions* optional_options);
+    const TfLiteModel* model, const TfLiteInterpreterOptions* optional_options, bool inModifyGraph = false);
 
 // Destroys the interpreter.
 TFL_CAPI_EXPORT extern void TfLiteInterpreterDelete(
     TfLiteInterpreter* interpreter);
+
+
+TFL_CAPI_EXPORT extern TfLiteStatus TfLiteInterpreterModifyGraphWithDelegate(
+    TfLiteInterpreter* interpreter, const TfLiteInterpreterOptions* optional_options);
 
 // Returns the number of input tensors associated with the model.
 TFL_CAPI_EXPORT extern int32_t TfLiteInterpreterGetInputTensorCount(
@@ -170,6 +178,10 @@ TFL_CAPI_EXPORT extern int32_t TfLiteInterpreterGetInputTensorCount(
 // Returns the tensor associated with the input index.
 // REQUIRES: 0 <= input_index < TfLiteInterpreterGetInputTensorCount(tensor)
 TFL_CAPI_EXPORT extern TfLiteTensor* TfLiteInterpreterGetInputTensor(
+    const TfLiteInterpreter* interpreter, int32_t input_index);
+
+
+TFL_CAPI_EXPORT extern int32_t TfLiteInterpreterGetInputTensorRawIndex(
     const TfLiteInterpreter* interpreter, int32_t input_index);
 
 // Resizes the specified input tensor.
@@ -197,6 +209,9 @@ TFL_CAPI_EXPORT extern TfLiteStatus TfLiteInterpreterAllocateTensors(
 TFL_CAPI_EXPORT extern TfLiteStatus TfLiteInterpreterInvoke(
     TfLiteInterpreter* interpreter);
 
+TFL_CAPI_EXPORT extern TfLiteStatus TfLiteInterpreterCopyToTensors(
+    TfLiteInterpreter* interpreter, TfLiteDelegate* delegate);
+
 // Returns the number of output tensors associated with the model.
 TFL_CAPI_EXPORT extern int32_t TfLiteInterpreterGetOutputTensorCount(
     const TfLiteInterpreter* interpreter);
@@ -209,6 +224,9 @@ TFL_CAPI_EXPORT extern int32_t TfLiteInterpreterGetOutputTensorCount(
 // In general, best practice is to interact with the output tensor *after*
 // calling TfLiteInterpreterInvoke().
 TFL_CAPI_EXPORT extern const TfLiteTensor* TfLiteInterpreterGetOutputTensor(
+    const TfLiteInterpreter* interpreter, int32_t output_index);
+
+TFL_CAPI_EXPORT extern int32_t TfLiteInterpreterGetOutputTensorRawIndex(
     const TfLiteInterpreter* interpreter, int32_t output_index);
 
 // --------------------------------------------------------------------------

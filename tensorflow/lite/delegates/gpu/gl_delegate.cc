@@ -70,6 +70,9 @@ TfLiteStatus DelegateCopyToBufferHandle(
     TfLiteBufferHandle buffer_handle,  // ValueId
     TfLiteTensor* tensor);
 
+TfLiteStatus DelegateCopyToTensors(
+    TfLiteContext* context, TfLiteDelegate* delegate);
+
 inline bool IsPHWC4(const BHWC& shape) {
   return shape.c == 4 || (shape.h == 1 && shape.w == 1 && shape.c % 4 == 0);
 }
@@ -122,6 +125,9 @@ class Delegate {
   absl::Status BindBufferToTensor(GLuint ssbo, int tensor_index) {
     int64_t bytes_size;
     RETURN_IF_ERROR(GetSSBOSize(ssbo, &bytes_size));
+    TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog SSBO size %d %d %d", bytes_size, ssbo, tensor_index);
+    TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog SSBO buf id %d", ssbo);
+    TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog SSBO tid %d", tensor_index);
     return bhwc_objects_.RegisterBuffer(
         tensor_index, GlBuffer(GL_SHADER_STORAGE_BUFFER, ssbo, bytes_size,
                                /* offset = */ 0,
@@ -193,9 +199,28 @@ class Delegate {
         // externally provided buffer.
         auto external_buffer = bhwc_objects_.FindBuffer(tensor_index);
         GlBuffer buffer;
-        if (IsPHWC4(input->tensor.shape) && external_buffer) {
+
+        TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog PREPARE %d, %d, %d, %d", tensor_index, input->tensor.shape.c, input->tensor.shape.h, input->tensor.shape.w);
+        TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog PREPARE BS %d", tensor->bytes);
+        isInputPHWC = false;
+        if (external_buffer)
+        {
+          isInputPHWC = IsPHWC4(input->tensor.shape);
+          //Hack
+          if (!isInputPHWC)
+          {
+            auto buffer_size = external_buffer->bytes_size();
+            if (input->tensor.shape.c == 3 && ((float)tensor->bytes / buffer_size) == 0.75f) //Buffer received is actually PHWC
+            {
+              isInputPHWC = true;
+            }
+          }
+        }
+        if (isInputPHWC) {
+          TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog EXTBUFFER");
           buffer = external_buffer->MakeRef();
         } else {
+          TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog EXTBUFFER222");
           RETURN_IF_ERROR(CreateReadWriteShaderStorageBuffer<float>(
               GetElementsSizeForPHWC4(input->tensor.shape), &buffer));
         }
@@ -226,11 +251,15 @@ class Delegate {
         tensor->delegate = &delegate_;
         tensors_[output->id].tensor_index = tensor_index;
 
+        TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog OUTPUT PREPARE %d, %d, %d, %d", tensor_index, output->tensor.shape.c, output->tensor.shape.h, output->tensor.shape.w);
+        
+
         // Create phwc4 output buffer.
         // Check whether there is externally provided object is already in
         // PHWC4. If yes, we may skip conversion step.
         auto external_buffer = bhwc_objects_.FindBuffer(tensor_index);
         GlBuffer buffer;
+        
         if (IsPHWC4(output->tensor.shape) && external_buffer) {
           buffer = external_buffer->MakeRef();
         } else {
@@ -284,6 +313,8 @@ class Delegate {
           "Delegate should run on the same thread where it was initialized.");
     }
 
+    TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog RUN HERE333");
+
     // Push input data from a tensor to GPU.
     for (ValueId id : inputs_) {
       const ValueRef& ref = tensors_[id];
@@ -291,7 +322,9 @@ class Delegate {
       if (external_object) {
         // Use input from GPU.
         // Conversion is needed only when external object is not phwc4.
-        if (!IsPHWC4(tensors_[id].shape)) {
+        TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog RUN HERE222");
+        if (!isInputPHWC) {
+          TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog RUN HERE");
           RETURN_IF_ERROR(bhwc_to_phwc4_.Convert(
               ref.shape, *external_object, command_queue_.get(),
               phwc4_objects_.FindBuffer(id)));
@@ -299,13 +332,16 @@ class Delegate {
       } else {
         // Copy from CPU to GPU
         TfLiteTensor& tensor = context->tensors[ref.tensor_index];
+        TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog RUN HERE444");
         RETURN_IF_ERROR(CopyToBufferHandle(id, &tensor));
       }
     }
-
+    
     // Run inference.
     RETURN_IF_ERROR(inference_context_->Reset());
     RETURN_IF_ERROR(inference_context_->Execute());
+    context->processed = false;
+    // return absl::OkStatus();
 
     // Push output data from GPU to a tensor.
     bool finished_gpu_processing = false;
@@ -315,23 +351,42 @@ class Delegate {
       if (external_object) {
         // Convert data from PHWC4 to BHWC and leave it in GPU object.
         // Conversion is needed only when external object is not phwc4.
+        TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog RUN HERE7777");
         if (!IsPHWC4(tensors_[id].shape)) {
+          TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog RUN HERE888");
           RETURN_IF_ERROR(
               phwc4_to_bhwc_.Convert(ref.shape, *phwc4_objects_.FindBuffer(id),
                                      command_queue_.get(), external_object));
         }
-      } else {
-        // Wait until all GPU command are completed. This call leads to a lower
-        // processing latency because a buffer reading below will not stall if
-        // data is not yet ready.
-        if (!finished_gpu_processing) {
-          RETURN_IF_ERROR(command_queue_->WaitForCompletion());
-          finished_gpu_processing = true;
-        }
-        // Copy from GPU to CPU.
-        TfLiteTensor& tensor = context->tensors[ref.tensor_index];
-        RETURN_IF_ERROR(CopyFromBufferHandle(id, &tensor));
+        context->processed = true;
       }
+    }
+    return absl::OkStatus();
+  }
+
+  absl::Status CopyToTensors(TfLiteContext* context)
+  {
+    if (context->processed)
+    {
+      TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog CopyToTensors");
+      return absl::OkStatus();
+    }
+    context->processed = true;
+    TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog CopyToTensors Copy");
+    bool finished_gpu_processing = false;
+    for (ValueId id : outputs_) {
+      const ValueRef& ref = tensors_[id];
+      // Wait until all GPU command are completed. This call leads to a lower
+      // processing latency because a buffer reading below will not stall if
+      // data is not yet ready.
+      TFLITE_LOG_PROD(TFLITE_LOG_INFO, "TFLiteLog RUN HERE999");
+      if (!finished_gpu_processing) {
+        //RETURN_IF_ERROR(command_queue_->WaitForCompletion());
+        finished_gpu_processing = true;
+      }
+      // Copy from GPU to CPU.
+      TfLiteTensor& tensor = context->tensors[ref.tensor_index];
+      RETURN_IF_ERROR(CopyFromBufferHandle(id, &tensor));
     }
     return absl::OkStatus();
   }
@@ -352,6 +407,7 @@ class Delegate {
       DelegatePrepare,                // .Prepare
       DelegateCopyFromBufferHandle,   // .CopyFromBufferHandle
       DelegateCopyToBufferHandle,     // .CopyToBufferHandle
+      DelegateCopyToTensors,          // .CopyToTensors
       nullptr,                        // .FreeBufferHandle
       kTfLiteDelegateFlagsNone,       // .flags
   };
@@ -368,6 +424,7 @@ class Delegate {
   ConverterBhwcToPhwc4 bhwc_to_phwc4_;
   std::unique_ptr<CommandQueue> command_queue_;
   std::unique_ptr<InferenceContext> inference_context_;
+  bool isInputPHWC;
 };
 
 inline Delegate* GetGpuDelegate(TfLiteNode* node) {
@@ -442,6 +499,17 @@ TfLiteStatus DelegateCopyToBufferHandle(TfLiteContext* context,
   if (status.ok()) return kTfLiteOk;
   TF_LITE_KERNEL_LOG(context, "TfLiteGpuDelegate CopyToBufferHandle: %s",
                      std::string(status.message()).c_str());
+  return kTfLiteError;
+}
+
+TfLiteStatus DelegateCopyToTensors(TfLiteContext* context,
+                                        TfLiteDelegate* delegate) {
+  auto* gpu_delegate = GetGpuDelegate(delegate);
+  if (!gpu_delegate) return kTfLiteError;
+  const auto status = gpu_delegate->CopyToTensors(context);
+  if (status.ok()) return kTfLiteOk;
+  context->ReportError(context, "TfLiteGpuDelegate CopyToTensors: %s",
+                       std::string(status.message()).c_str());
   return kTfLiteError;
 }
 

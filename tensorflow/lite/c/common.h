@@ -634,6 +634,8 @@ typedef struct TfLiteContext {
   // WARNING: This is an experimental API and subject to change.
   bool allow_fp32_relax_to_fp16;
 
+  bool processed;
+
   // Pointer to the op-level profiler, if set; nullptr otherwise.
   void* profiler;
 
@@ -805,6 +807,9 @@ typedef struct TfLiteDelegate {
                                      struct TfLiteDelegate* delegate,
                                      TfLiteBufferHandle buffer_handle,
                                      TfLiteTensor* tensor);
+
+  TfLiteStatus (*CopyToTensors)(TfLiteContext* context,
+                          struct TfLiteDelegate* delegate);
 
   // Free the Delegate Buffer Handle. Note: This only frees the handle, but
   // this doesn't release the underlying resource (e.g. textures). The

@@ -51,6 +51,8 @@ struct TfLiteInterpreterOptions {
   std::vector<TfLiteDelegate*> delegates;
 
   bool use_nnapi = false;
+
+  bool allow_buffer_handle_output = false;
 };
 
 struct TfLiteInterpreter {

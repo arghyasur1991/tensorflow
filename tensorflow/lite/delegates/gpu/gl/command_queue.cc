@@ -59,7 +59,7 @@ class AdrenoCommandQueue : public DefaultCommandQueue {
                         const uint3& workgroups) final {
     RETURN_IF_ERROR(DefaultCommandQueue::Dispatch(program, workgroups));
     if ((++program_counter_ % flush_every_n_) == 0) {
-      glFlush();
+      //glFlush();
     }
     return absl::OkStatus();
   }
@@ -73,7 +73,7 @@ class AdrenoCommandQueue : public DefaultCommandQueue {
     // Flush exactly once after the last dispatch.
     if (program_counter_ != 0) {
       program_counter_ = 0;
-      glFlush();
+      //glFlush();
     }
     return absl::OkStatus();
   }
@@ -87,7 +87,7 @@ class AdrenoCommandQueue : public DefaultCommandQueue {
 
 std::unique_ptr<CommandQueue> NewCommandQueue(const GpuInfo& gpu_info) {
   if (gpu_info.type == GpuType::ADRENO) {
-    int flush_every_n = 1;
+    int flush_every_n = 10;
     // On Adreno 630 and Adreno 505 there is up to 2x performance boost when
     // glFlush happens not so often.
     if (gpu_info.gpu_model == GpuModel::ADRENO630 ||

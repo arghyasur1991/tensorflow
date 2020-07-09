@@ -15,6 +15,7 @@ limitations under the License.
 #include "tensorflow/lite/c/c_api.h"
 
 #include <memory>
+#include <chrono>
 
 #include "tensorflow/lite/c/c_api_internal.h"
 #include "tensorflow/lite/error_reporter.h"
@@ -22,6 +23,9 @@ limitations under the License.
 #include "tensorflow/lite/kernels/register.h"
 #include "tensorflow/lite/model.h"
 #include "tensorflow/lite/version.h"
+#include "tensorflow/lite/minimal_logging.h"
+
+#define LOG_RUN_TIME 0
 
 #ifdef __cplusplus
 extern "C" {
@@ -84,6 +88,12 @@ void TfLiteInterpreterOptionsAddDelegate(TfLiteInterpreterOptions* options,
   options->delegates.push_back(delegate);
 }
 
+void TfLiteInterpreterOptionsSetAllowBufferHandleOutput(
+    TfLiteInterpreterOptions* options, bool allow_buffer_handle_output)
+{
+  options->allow_buffer_handle_output = allow_buffer_handle_output;
+}
+
 void TfLiteInterpreterOptionsSetErrorReporter(
     TfLiteInterpreterOptions* options,
     void (*reporter)(void* user_data, const char* format, va_list args),
@@ -94,7 +104,8 @@ void TfLiteInterpreterOptionsSetErrorReporter(
 
 TfLiteInterpreter* TfLiteInterpreterCreate(
     const TfLiteModel* model,
-    const TfLiteInterpreterOptions* optional_options) {
+    const TfLiteInterpreterOptions* optional_options, 
+    bool inModifyGraph) {
   if (!model || !model->impl) {
     return nullptr;
   }
@@ -130,15 +141,33 @@ TfLiteInterpreter* TfLiteInterpreterCreate(
       interpreter->SetNumThreads(optional_options->num_threads);
     }
 
-    for (auto* delegate : optional_options->delegates) {
-      if (interpreter->ModifyGraphWithDelegate(delegate) != kTfLiteOk) {
-        return nullptr;
+    if (inModifyGraph)
+    {
+      for (auto* delegate : optional_options->delegates) {
+        if (interpreter->ModifyGraphWithDelegate(delegate) != kTfLiteOk) {
+          return nullptr;
+        }
       }
     }
   }
 
   return new TfLiteInterpreter{model->impl, std::move(optional_error_reporter),
                                std::move(interpreter)};
+}
+
+TfLiteStatus TfLiteInterpreterModifyGraphWithDelegate(
+    TfLiteInterpreter* interpreter, const TfLiteInterpreterOptions* optional_options)
+{
+  if (optional_options->allow_buffer_handle_output)
+  {
+    interpreter->impl->SetAllowBufferHandleOutput(true);
+  }
+  for (auto* delegate : optional_options->delegates) {
+    if (interpreter->impl->ModifyGraphWithDelegate(delegate) != kTfLiteOk) {
+      return kTfLiteError;
+    }
+  }
+  return kTfLiteOk;
 }
 
 void TfLiteInterpreterDelete(TfLiteInterpreter* interpreter) {
@@ -155,6 +184,11 @@ TfLiteTensor* TfLiteInterpreterGetInputTensor(
   return interpreter->impl->tensor(interpreter->impl->inputs()[input_index]);
 }
 
+int32_t TfLiteInterpreterGetInputTensorRawIndex(
+    const TfLiteInterpreter* interpreter, int32_t input_index) {
+  return interpreter->impl->inputs()[input_index];
+}
+
 TfLiteStatus TfLiteInterpreterResizeInputTensor(TfLiteInterpreter* interpreter,
                                                 int32_t input_index,
                                                 const int* input_dims,
@@ -169,7 +203,20 @@ TfLiteStatus TfLiteInterpreterAllocateTensors(TfLiteInterpreter* interpreter) {
 }
 
 TfLiteStatus TfLiteInterpreterInvoke(TfLiteInterpreter* interpreter) {
+#if LOG_RUN_TIME
+  const auto startTime = std::chrono::steady_clock::now();
+  auto status = interpreter->impl->Invoke();
+  const auto endTime = std::chrono::steady_clock::now();
+  const auto elapsedTimeInMiliSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
+  TFLITE_LOG_PROD(tflite::TFLITE_LOG_INFO, "TFLite Native run time: %d ms", elapsedTimeInMiliSeconds);
+  return status;
+ #else
   return interpreter->impl->Invoke();
+ #endif
+}
+
+TfLiteStatus TfLiteInterpreterCopyToTensors(TfLiteInterpreter* interpreter, TfLiteDelegate* delegate) {
+  return interpreter->impl->CopyToTensors(delegate);
 }
 
 int32_t TfLiteInterpreterGetOutputTensorCount(
@@ -180,6 +227,11 @@ int32_t TfLiteInterpreterGetOutputTensorCount(
 const TfLiteTensor* TfLiteInterpreterGetOutputTensor(
     const TfLiteInterpreter* interpreter, int32_t output_index) {
   return interpreter->impl->tensor(interpreter->impl->outputs()[output_index]);
+}
+
+int32_t TfLiteInterpreterGetOutputTensorRawIndex(
+    const TfLiteInterpreter* interpreter, int32_t output_index) {
+  return interpreter->impl->outputs()[output_index];
 }
 
 TfLiteType TfLiteTensorType(const TfLiteTensor* tensor) { return tensor->type; }

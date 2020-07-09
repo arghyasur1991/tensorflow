@@ -506,6 +506,9 @@ class Interpreter {
   void AddSubgraphs(int subgraphs_to_add,
                     int* first_new_subgraph_index = nullptr);
 
+  TfLiteStatus CopyToTensors(TfLiteDelegate* delegate);
+
+
   /// Return the number of subgraphs in the model.
   /// WARNING: This is an experimental API and subject to change.
   size_t subgraphs_size() const { return subgraphs_.size(); }

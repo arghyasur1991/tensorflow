@@ -249,6 +249,11 @@ TfLiteStatus Interpreter::Invoke() {
   return kTfLiteOk;
 }
 
+TfLiteStatus Interpreter::CopyToTensors(TfLiteDelegate* delegate)
+{
+  return delegate->CopyToTensors(context_, delegate);
+}
+
 TfLiteStatus Interpreter::AddTensors(int tensors_to_add,
                                      int* first_new_tensor_index) {
   return primary_subgraph().AddTensors(tensors_to_add, first_new_tensor_index);
